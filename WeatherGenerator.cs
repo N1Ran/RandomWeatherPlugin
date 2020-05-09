@@ -74,6 +74,16 @@ namespace RandomWeatherPlugin
 
         }
 
+        public static string GetWeather(MyPlanet planet)
+        {
+            float planetRadius = planet.MaximumRadius;
+            Vector3D pos = planet.PositionLeftBottomCorner + new Vector3D(planetRadius, planetRadius, planetRadius);
+            var currentWeather = GetWeather(pos);
+
+            return currentWeather;
+
+        }
+
         [ReflectedGetter(Name = "m_weatherPlanetData", Type = typeof(MySectorWeatherComponent))]
         private static Func<MySectorWeatherComponent, List<MyObjectBuilder_WeatherPlanetData>> _planetWeatherGet;
 
@@ -142,7 +152,76 @@ namespace RandomWeatherPlugin
             SyncWeather();
         }
 
+        public static bool SpawnWeather(MyWeatherEffectDefinition weather, Vector3D position, float radius)
+        {
+            MyPlanet closestPlanet = MyGamePruningStructure.GetClosestPlanet(position);
+
+            if (closestPlanet == null) return false;
+
+            var sessionWeather = MySession.Static.GetComponent<MySectorWeatherComponent>();
+            var sessionWeatherPlanetData = _planetWeatherGet(sessionWeather);
+            if (Math.Abs((double) radius) < 1)
+                radius = 0.1122755f * closestPlanet.AtmosphereRadius;
+            var weatherPosition = new Vector3D?(closestPlanet.GetClosestSurfacePointGlobal(ref position));
+
+            MyObjectBuilder_WeatherEffect builderWeatherEffect1 = new MyObjectBuilder_WeatherEffect()
+            {
+                Weather = weather.Id.SubtypeName,
+                Position = weatherPosition.Value,
+                Radius = radius
+                };
+            MyObjectBuilder_WeatherPlanetData weatherPlanetData;
+            List<MyObjectBuilder_WeatherEffect> builderWeatherEffectList = new List<MyObjectBuilder_WeatherEffect>();
+           
+            BoundingSphereD boundingSphereD = new BoundingSphereD(weatherPosition.Value, (double) radius);
+
+            for (int index1 = 0; index1 < sessionWeatherPlanetData.Count; ++index1)
+            {
+                if (sessionWeatherPlanetData[index1].PlanetId == closestPlanet.EntityId)
+                {
+                    builderWeatherEffectList.Clear();
+                    for (int index2 = 0; index2 < sessionWeatherPlanetData[index1].Weathers.Count; ++index2)
+                    {
+                        BoundingSphereD sphere = new BoundingSphereD(sessionWeatherPlanetData[index1].Weathers[index2].Position, (double) sessionWeatherPlanetData[index1].Weathers[index2].Radius);
+                        if (boundingSphereD.Intersects(sphere))
+                            builderWeatherEffectList.Add(sessionWeatherPlanetData[index1].Weathers[index2]);
+                    }
+                    foreach (MyObjectBuilder_WeatherEffect builderWeatherEffect in builderWeatherEffectList)
+                        sessionWeatherPlanetData[index1].Weathers.Remove(builderWeatherEffect);
+                }
+            }
+
+            bool flag = false;
+
+            for (int index = 0; index < sessionWeatherPlanetData.Count; ++index)
+            {
+                if (sessionWeatherPlanetData[index].PlanetId == closestPlanet.EntityId)
+                {
+                    sessionWeatherPlanetData[index].Weathers.Add(builderWeatherEffect1);
+                    flag = true;
+                    break;
+                }
+            }
+
+            if (!flag)
+            {
+                weatherPlanetData = new MyObjectBuilder_WeatherPlanetData()
+                {
+                    PlanetId = closestPlanet.EntityId
+                };
+                weatherPlanetData.Weathers.Add(builderWeatherEffect1);
+                sessionWeatherPlanetData.Add(weatherPlanetData);
+            }
+
+            SyncWeather();
+
+            return true;
+
+
+        }
+
         private static MethodInfo _updateWeatherOnClients = typeof(MySectorWeatherComponent).GetMethod("UpdateWeathersOnClients", BindingFlags.NonPublic | BindingFlags.Static);
+
 
 
         public static void SyncWeather()
