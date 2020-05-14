@@ -42,6 +42,20 @@ namespace RandomWeatherPlugin
             return newWeatherList[new Random().Next(newWeatherList.Count)];
         }
 
+        public static MyWeatherEffectDefinition GetWeatherDefinition(string weatherName)
+        {
+            MyWeatherEffectDefinition weatherDef = null;
+            ListReader<MyWeatherEffectDefinition> weatherDefinitions = MyDefinitionManager.Static.GetWeatherDefinitions();
+            foreach (var weather in weatherDefinitions)
+            {
+                if (!weather.Id.SubtypeName.Equals(weatherName,StringComparison.OrdinalIgnoreCase))continue;
+                weatherDef = weather;
+                break;
+            }
+
+            return weatherDef;
+        }
+
         public static bool TryGetWeather(string weather, out MyWeatherEffectDefinition weatherDef)
         {
             weatherDef = null;
@@ -170,7 +184,6 @@ namespace RandomWeatherPlugin
                 Position = weatherPosition.Value,
                 Radius = radius
                 };
-            MyObjectBuilder_WeatherPlanetData weatherPlanetData;
             List<MyObjectBuilder_WeatherEffect> builderWeatherEffectList = new List<MyObjectBuilder_WeatherEffect>();
            
             BoundingSphereD boundingSphereD = new BoundingSphereD(weatherPosition.Value, (double) radius);
@@ -205,7 +218,7 @@ namespace RandomWeatherPlugin
 
             if (!flag)
             {
-                weatherPlanetData = new MyObjectBuilder_WeatherPlanetData()
+                var weatherPlanetData = new MyObjectBuilder_WeatherPlanetData()
                 {
                     PlanetId = closestPlanet.EntityId
                 };
@@ -223,13 +236,11 @@ namespace RandomWeatherPlugin
         private static MethodInfo _updateWeatherOnClients = typeof(MySectorWeatherComponent).GetMethod("UpdateWeathersOnClients", BindingFlags.NonPublic | BindingFlags.Static);
 
 
-
-        public static void SyncWeather()
+        private static void SyncWeather()
         {
             var sessionWeather = MySession.Static.GetComponent<MySectorWeatherComponent>();
             var sessionWeatherPlanetData = _planetWeatherGet(sessionWeather);
             NetworkManager.RaiseStaticEvent(_updateWeatherOnClients, sessionWeatherPlanetData.ToArray());
-            //Sandbox.Engine.Multiplayer.MyMultiplayer.RaiseStaticEvent<MyObjectBuilder_WeatherPlanetData[]>((Func<IMyEventOwner, Action<MyObjectBuilder_WeatherPlanetData[]>>) (x => new Action<MyObjectBuilder_WeatherPlanetData[]>(MySectorWeatherComponent.UpdateWeathersOnClients)), sessionWeatherPlanetData.ToArray(), new EndpointId(), new Vector3D?());
         }
 
         public static string GetWeather(Vector3D position)

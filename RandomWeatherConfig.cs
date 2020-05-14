@@ -34,6 +34,7 @@ namespace RandomWeatherPlugin
 
         [XmlIgnore] public MtObservableList<string> ExceptedPlanets { get; } = new MtObservableList<string>();
 
+
         [XmlArray(nameof(ExceptedPlanets))]
         [XmlArrayItem(nameof(ExceptedPlanets), ElementName = "PlanetName")]
         public string[] ExceptedPlanetsSerial
@@ -47,6 +48,7 @@ namespace RandomWeatherPlugin
                     ExceptedPlanets.Add(k);
             }
         }
+
 
         [XmlIgnore] public MtObservableList<string> ExceptedWeathers { get; } = new MtObservableList<string>();
 

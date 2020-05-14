@@ -120,9 +120,17 @@ namespace RandomWeatherPlugin
                     var removeWeather = new List<string>();
                     var currentWeather = WeatherGenerator.GetWeather(pos);
                     if (Instance.Config.ExceptedWeathers.Count>0)removeWeather.AddRange(Instance.Config.ExceptedWeathers);
-                    if (currentWeather != null)removeWeather.Add(currentWeather);
+                    MyWeatherEffectDefinition weatherToSpawn;
                     if (_lastChoice != null)removeWeather.Add(_lastChoice.Id.SubtypeName);
-                    var weatherToSpawn = WeatherGenerator.GetRandomWeather(removeWeather);
+
+                    if (string.IsNullOrEmpty(currentWeather) || currentWeather.Equals("clear",StringComparison.OrdinalIgnoreCase))
+                    {
+                        weatherToSpawn = WeatherGenerator.GetRandomWeather(removeWeather);
+                    }
+                    else
+                    {
+                        weatherToSpawn = WeatherGenerator.GetWeatherDefinition("Clear");
+                    }
                     if (weatherToSpawn == null)continue;
                     _lastChoice = weatherToSpawn;
                     WeatherGenerator.SetWeatherOnPlanet(planet,weatherToSpawn);
