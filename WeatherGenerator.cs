@@ -42,6 +42,24 @@ namespace RandomWeatherPlugin
             return newWeatherList[new Random().Next(newWeatherList.Count)];
         }
 
+        public static MyWeatherEffectDefinition GetRandomWeatherFromList(List<string> listedWeather = null, string lastWeather = null)
+        {
+            if (listedWeather == null || listedWeather.Count == 0) return GetRandomWeather(new List<string>{lastWeather});
+
+            ListReader<MyWeatherEffectDefinition> weatherDefinitions = MyDefinitionManager.Static.GetWeatherDefinitions();
+            var newWeatherList = new List<MyWeatherEffectDefinition>();
+
+            foreach (var weatherName in listedWeather)
+            {
+                if (weatherName.Equals(lastWeather)) continue;
+                var def = GetWeatherDefinition(weatherName);
+                if (def == null) continue;
+                newWeatherList.Add(def);
+            }
+
+            return newWeatherList.Count == 0 ? GetWeatherDefinition("Clear") : newWeatherList[new Random().Next(newWeatherList.Count)];
+        }
+
         public static MyWeatherEffectDefinition GetWeatherDefinition(string weatherName)
         {
             MyWeatherEffectDefinition weatherDef = null;

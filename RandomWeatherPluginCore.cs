@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Controls;
+using System.Xml.Serialization;
 using NLog;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
@@ -21,6 +22,7 @@ using Torch.API.Plugins;
 using Torch.API.Session;
 using Torch.Managers;
 using Torch.Session;
+using Torch.Views;
 using VRage.Collections;
 using VRage.Game;
 using VRage.Network;
@@ -38,13 +40,30 @@ namespace RandomWeatherPlugin
         private ConcurrentDictionary<MyPlanet,DateTime>_lastRun = new ConcurrentDictionary<MyPlanet, DateTime>();
         public static string ChatName;
 
-        private Control _control;
-        public UserControl GetControl() => _control ?? (_control = new Control(this));
+        private XmlAttributeOverrides _overrides;
+
         private Persistent<RandomWeatherConfig> _config;
         private int _updateCounter;
+        private bool _loading;
         public RandomWeatherConfig Config => _config?.Data;
 
-        public void Save() => _config.Save();
+
+        
+        private UserControl _control;
+        private UserControl Control => _control ?? (_control = new PropertyGrid{ DataContext = RandomWeatherConfig.Instance});
+        public UserControl GetControl()
+        {
+            return Control;
+        }
+        private void EnableControl(bool enable = true)
+        {
+            _control?.Dispatcher?.Invoke(() =>
+            {
+                Control.IsEnabled = enable;
+                Control.DataContext = RandomWeatherConfig.Instance;
+            });
+
+        }
 
         public override void Init(ITorchBase torch)
         {
@@ -52,11 +71,12 @@ namespace RandomWeatherPlugin
             Instance = this;
             ChatName = Torch.Config.ChatName;
 
+            Load();
+
             _sessionManager = Torch.Managers.GetManager<TorchSessionManager>();
             if (_sessionManager != null)
                 _sessionManager.SessionStateChanged += SessionChanged;
-            var configFile = Path.Combine(StoragePath, "RandomWeatherPlugin.cfg");
-
+            /*
             try 
             {
 
@@ -73,7 +93,7 @@ namespace RandomWeatherPlugin
 
             _config = new Persistent<RandomWeatherConfig>(configFile, new RandomWeatherConfig());
             _config.Save();
-
+            */
         }
 
         private void SessionChanged(ITorchSession session, TorchSessionState newstate)
@@ -84,15 +104,105 @@ namespace RandomWeatherPlugin
                     break;
                 case TorchSessionState.Loaded:
                     DoInit();
+                    EnableControl();
                     break;
                 case TorchSessionState.Unloading:
                     break;
                 case TorchSessionState.Unloaded:
+                    Dispose();
                     break;
                 default:
                     return;
             }
         }
+
+        #region Saving/Loading
+
+        public void Save()
+        {
+
+            if (_loading)
+                return;
+
+            try
+            {
+                lock (this)
+                {
+                    var configFile = Path.Combine(StoragePath, "RandomWeatherPlugin.cfg");
+                    using (var writer = new StreamWriter(configFile))
+                    {
+                        XmlSerializer x;
+                        if (_overrides != null)
+                            x = new XmlSerializer(typeof(RandomWeatherConfig), _overrides);
+                        else
+                            x = new XmlSerializer(typeof(RandomWeatherConfig));
+                        x.Serialize(writer, RandomWeatherConfig.Instance);
+                        writer.Close();
+                    }
+                    Log.Info($"Saved");
+
+                }
+            }
+            catch (Exception e)
+            {
+                lock (this)
+                {
+                    Log.Error(e);
+                }
+            }
+
+        }
+
+        private void Load()
+        {
+            _loading = true;
+
+            try
+            {
+                lock (this)
+                {
+                    var configFile = Path.Combine(StoragePath, "RandomWeatherPlugin.cfg");
+
+                    if (File.Exists(configFile))
+                    {
+                        using (var reader = new StreamReader(configFile))
+                        {
+                            var x = _overrides != null ? new XmlSerializer(typeof(RandomWeatherConfig), _overrides) : new XmlSerializer(typeof(RandomWeatherConfig));
+                            var settings = (RandomWeatherConfig)x.Deserialize(reader);
+                            
+                            reader.Close();
+                            if(settings != null)RandomWeatherConfig.Instance = settings;
+                        }
+                    }
+                    else
+                    {
+                        Log.Info("No settings. Initialzing new file at " + configFile);
+                        RandomWeatherConfig.Instance = new RandomWeatherConfig();
+                        RandomWeatherConfig.Instance.CustomWeatherRules.Add(new CustomWeatherRule());
+                        using (var writer = new StreamWriter(configFile))
+                        {
+                            var x = _overrides != null ? new XmlSerializer(typeof(RandomWeatherConfig), _overrides) : new XmlSerializer(typeof(RandomWeatherConfig));
+                            x.Serialize(writer, RandomWeatherConfig.Instance);
+                            writer.Close();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                lock (this)
+                {
+                    Log.Error(ex);
+                }
+            }
+            finally
+            {
+                _loading = false;
+            }
+        }
+
+        #endregion
+
 
         private void DoInit()
         {
@@ -109,23 +219,39 @@ namespace RandomWeatherPlugin
         private void SpawnWeathers()
         {
             if (MySession.Static.Players.GetOnlinePlayerCount() == 0 || _planets.Count == 0) return;
+
+            var rules = new HashSet<CustomWeatherRule>();
+
+            rules.UnionWith(RandomWeatherConfig.Instance.CustomWeatherRules);
+            
             foreach (var planet in _planets)
             {
-                if (Config.ExceptedPlanets.Contains(planet.DisplayName,StringComparer.OrdinalIgnoreCase) ||planet.Storage.MarkedForClose || planet.Storage == null) continue;
                 if (!planet.HasAtmosphere) continue;
+                var removeWeather = new List<string>();
+                if (planet.Storage.MarkedForClose || planet.Storage == null) continue;
+                CustomWeatherRule foundRule = null;
+
+                foreach (var rule in rules)
+                {
+                    if (!rule.PlanetId.Equals(planet.EntityId)) continue;
+                    foundRule = rule;
+                    break;
+                }
+                var interval = foundRule?.Interval ?? RandomWeatherConfig.Instance.WeatherInterval ;
+
                 if (!_lastRun.TryGetValue(planet, out var time))
                 {
                     float planetRadius = planet.MaximumRadius;
                     Vector3D pos = planet.PositionLeftBottomCorner + new Vector3D(planetRadius, planetRadius, planetRadius);
-                    var removeWeather = new List<string>();
                     var currentWeather = WeatherGenerator.GetWeather(pos);
-                    if (Instance.Config.ExceptedWeathers.Count>0)removeWeather.AddRange(Instance.Config.ExceptedWeathers);
                     MyWeatherEffectDefinition weatherToSpawn;
                     if (_lastChoice != null)removeWeather.Add(_lastChoice.Id.SubtypeName);
 
                     if (string.IsNullOrEmpty(currentWeather) || currentWeather.Equals("clear",StringComparison.OrdinalIgnoreCase))
                     {
-                        weatherToSpawn = WeatherGenerator.GetRandomWeather(removeWeather);
+                        weatherToSpawn = foundRule == null
+                            ? WeatherGenerator.GetRandomWeather(removeWeather)
+                            : WeatherGenerator.GetRandomWeatherFromList(foundRule.WeatherList, currentWeather);
                     }
                     else
                     {
@@ -138,8 +264,9 @@ namespace RandomWeatherPlugin
 
                     break;
                 }
-                if (Math.Abs((DateTime.Now - time).TotalMilliseconds) < Config.WeatherInterval * 60000) continue;
+                if (Math.Abs((DateTime.Now - time).TotalMilliseconds) < interval * 60000) continue;
                 _lastRun.Remove(planet);
+                break;
             }
 
         }
@@ -152,8 +279,9 @@ namespace RandomWeatherPlugin
         public override void Update()
         {
             base.Update();
-            if (MyAPIGateway.Session == null|| !Config.Enable)
+            if (MyAPIGateway.Session == null|| !RandomWeatherConfig.Instance.Enable || MySession.Static.Players.GetOnlinePlayerCount() == 0)
                 return;
+
             if (++_updateCounter % 1000 == 0 && MySession.Static.Players.GetOnlinePlayerCount() > 0)
             {
                 if (_planets.Count == 0)
@@ -162,7 +290,10 @@ namespace RandomWeatherPlugin
                     Log.Warn("No Planet Found");
                     return;
                 }
-                SpawnWeathers();
+                else
+                {
+                    SpawnWeathers();
+                }
             }
 
         }

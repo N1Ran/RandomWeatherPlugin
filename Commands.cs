@@ -128,14 +128,15 @@ namespace RandomWeatherPlugin
                 return;
             }
             var sb = new StringBuilder();
-            sb.AppendLine("PlanetName: WeatherSubtypeId");
+            sb.AppendLine("PlanetName [Id]: WeatherSubtypeId");
             foreach (var planet in planets)
             {
                 var weather = string.IsNullOrEmpty(WeatherGenerator.GetWeather(planet))? "None Set" : WeatherGenerator.GetWeather(planet);
-                sb.AppendLine($"{planet.Name}: {weather}");
+                sb.AppendLine($"{planet.Name} [{planet.EntityId}]: {weather}");
             }
 
             Context.Respond(sb.ToString());
+            RandomWeatherPluginCore.Log.Info(sb.ToString);
         }
 
 
